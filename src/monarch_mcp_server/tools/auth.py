@@ -17,21 +17,21 @@ async def setup_authentication() -> str:
     """Get instructions for setting up secure authentication with Monarch Money."""
     return """🔐 Monarch Money - Authentication Options
 
-Option 1: Elicitation login (Recommended for interactive clients)
+Option 1 (recommended for Codex and all clients): Terminal
+   Run in terminal: python login_setup.py
+   Supports browser session cookies, email/password (with email OTP and
+   MFA), and a legacy session token. Codex and some other MCP hosts do
+   not support in-client login forms reliably — use this path first.
+
+Option 2: Elicitation login (Claude Desktop / Claude Code)
    Call 'monarch_login' to enter email/password (and MFA if needed)
    via a secure form in your client UI. Credentials never pass
    through the model. Or 'monarch_login_with_token' to paste a
    browser-copied session token.
 
-Option 2: Email/Password (Terminal)
-   Run in terminal: python login_setup.py
-   Enter the email verification code if Monarch sends one (this can
-   happen for a new device/session even when MFA is off), and your
-   2FA code if MFA is enabled.
-
 Call 'monarch_logout' to clear the stored session.
 
-✅ Session persists across restarts
+✅ Session persists across restarts and is shared across MCP clients
 ✅ Token stored securely in system keyring"""
 
 

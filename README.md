@@ -2,7 +2,7 @@
 
 # Monarch Money MCP Server
 
-A Model Context Protocol (MCP) server for integrating with the Monarch Money personal finance platform. This server provides seamless access to your financial accounts, transactions, budgets, and analytics through Claude Desktop and Claude Code.
+A Model Context Protocol (MCP) server for integrating with the Monarch Money personal finance platform. This server provides seamless access to your financial accounts, transactions, budgets, and analytics through Claude Desktop, Claude Code, and OpenAI Codex.
 
 My MonarchMoney referral: https://www.monarchmoney.com/referral/ufmn0r83yf?r_source=share
 
@@ -131,9 +131,66 @@ My MonarchMoney referral: https://www.monarchmoney.com/referral/ufmn0r83yf?r_sou
 
 4. **Restart Claude Code**
 
+**OR**
+
+3. **Configure Codex** (CLI, Desktop, or IDE):
+
+   Codex uses TOML, not the Claude JSON `mcpServers` block. After `uv sync` or `pip install -e .`, add the server to `~/.codex/config.toml` (user-level) or `.codex/config.toml` in a trusted project.
+
+   A copy-pasteable example lives in [`examples/codex.config.toml`](examples/codex.config.toml).
+
+   Fastest add:
+
+   ```bash
+   codex mcp add monarch-money -- uv run --directory /path/to/your/monarch-mcp-server monarch-mcp-server
+   ```
+
+   Then edit `~/.codex/config.toml` and set timeouts (Codex defaults to 10s startup, which is tight for a Python MCP server):
+
+   ```toml
+   [mcp_servers.monarch-money]
+   command = "uv"
+   args = [
+     "run",
+     "--directory",
+     "/path/to/your/monarch-mcp-server",
+     "monarch-mcp-server",
+   ]
+   startup_timeout_sec = 30
+   tool_timeout_sec = 120
+   default_tools_approval_mode = "prompt"
+   ```
+
+   **If installed via `pip`** instead of `uv`:
+
+   ```toml
+   [mcp_servers.monarch-money]
+   command = "python"
+   args = ["-m", "monarch_mcp_server"]
+   cwd = "/path/to/your/monarch-mcp-server"
+   startup_timeout_sec = 30
+   tool_timeout_sec = 120
+   default_tools_approval_mode = "prompt"
+   ```
+
+   Authenticate in a terminal **before** starting Codex (`python login_setup.py`). Codex does not support in-client elicitation login reliably; the session saved by `login_setup.py` is reused by Codex.
+
+   Verify:
+
+   ```bash
+   codex mcp list
+   codex mcp get monarch-money
+   ```
+
+   Then in a Codex session, call `get_accounts`.
+
+   **Important**: Replace `/path/to/your/monarch-mcp-server` with your actual path. Do **not** use `uv run --with mcp[cli] ... mcp run ...` for Codex — that re-resolves packages on every launch and often exceeds the startup timeout, and `mcp run` can print to stdout (the MCP protocol stream). This server requires MCP Python SDK 1.x (`mcp>=1.10,<2`); SDK 2.x renamed FastMCP and is not compatible yet.
+
+4. **Restart Codex** (or start a new Codex session)
+
 ### 2. One-Time Authentication Setup
 
-**Important**: For security and MFA support, authentication is done outside of Claude.
+**Important**: For security and MFA support, authentication is done outside of Claude and Codex.
 
 Open a terminal and run:
 
@@ -172,7 +229,7 @@ Kept for users with an existing token captured before the May 2026 API change. M
 
 ### 3. Start Using
 
-Once authenticated, use these tools directly in Claude Desktop or Claude Code:
+Once authenticated, use these tools directly in Claude Desktop, Claude Code, or Codex:
 - `get_accounts` - View all your financial accounts
 - `get_transactions` - Recent transactions with filtering
 - `get_budgets` - Budget information and spending
@@ -414,8 +471,17 @@ Approve the Netflix recurring stream using review_recurring_stream
 ### Authentication Issues
 If you see "Authentication needed" errors:
 1. Run the setup command: `cd /path/to/your/monarch-mcp-server && python login_setup.py` (or `uv run python login_setup.py`)
-2. Restart Claude Desktop or Claude Code
+2. Restart Claude Desktop, Claude Code, or start a new Codex session
 3. Try using a tool like `get_accounts`
+
+### Codex server failed to start / startup timeout
+Codex's default MCP startup timeout is 10 seconds. If `codex mcp list` shows the server as failed:
+1. Confirm you installed the package (`uv sync` or `pip install -e .`) so Codex can launch `monarch-mcp-server` or `python -m monarch_mcp_server` without `uv run --with ... mcp run ...`
+2. Set `startup_timeout_sec = 30` (and `tool_timeout_sec = 120`) on `[mcp_servers.monarch-money]` in `~/.codex/config.toml`
+3. Confirm the `[mcp_servers]` table name uses an underscore (`mcp_servers`), not `mcp.servers`
+
+### Codex JSON-RPC parse errors
+Stdio MCP reserves stdout for protocol messages. If Codex reports a JSON parse error on connect, you are likely launching via `mcp run` (which can print a banner). Use the console script or `python -m monarch_mcp_server` instead.
 
 ### Email Verification Required
 Monarch may require an email one-time code for a new device or session, even if MFA is not enabled. If you see an email-code prompt:
@@ -430,13 +496,15 @@ If your session dies quickly (under a couple of hours), the most common cause is
 If `login_setup.py` reports "Programmatic login is blocked by Cloudflare CAPTCHA", choose option 1 (browser cookies) instead. Email/password POSTs to Monarch's login endpoint are sometimes gated by Cloudflare for unfamiliar IPs or rapid retries; cookie-based auth bypasses that endpoint entirely.
 
 ### `'Context' object has no attribute 'elicit'`
-The `monarch_login` and `monarch_login_with_token` tools require the MCP Python SDK 1.10.0 or newer (released June 2025). If your environment cached an older `mcp` install, refresh it:
+The `monarch_login` and `monarch_login_with_token` tools need a client that supports MCP elicitation (Claude Desktop / Claude Code with MCP Python SDK 1.10.0 or newer). Codex and some other hosts do not support elicitation reliably — for those clients, skip in-client login and run `python login_setup.py` from the repo.
+
+If Claude shows this error because your environment cached an older `mcp` install, refresh it:
 
 ```bash
 uv cache clean mcp
 ```
 
-Then fully quit and reopen Claude Desktop or Claude Code so it relaunches the server with a fresh resolution. As a fallback while you upgrade, run `python login_setup.py` from the repo to authenticate via the terminal.
+Then fully quit and reopen Claude Desktop or Claude Code so it relaunches the server with a fresh resolution.
 
 ### Common Error Messages
 - **"No valid session found"**: Run `python login_setup.py` (or `uv run python login_setup.py`) 
@@ -451,12 +519,15 @@ Then fully quit and reopen Claude Desktop or Claude Code so it relaunches the se
 monarch-mcp-server/
 ├── src/monarch_mcp_server/
 │   ├── __init__.py
+│   ├── __main__.py        # `python -m monarch_mcp_server` stdio entry
 │   ├── app.py             # FastMCP app instance and entry point
 │   ├── client.py          # Cached MonarchMoney client factory
 │   ├── monarch_auth.py    # Current Monarch auth compatibility (host, email OTP, device-uuid)
 │   ├── secure_session.py  # Keyring-backed token storage (file fallback)
 │   ├── server.py          # Backward-compatibility shim re-exporting the tools
 │   └── tools/             # MCP tools grouped by domain (accounts, transactions, budgets, …)
+├── examples/
+│   └── codex.config.toml  # Copy-pasteable OpenAI Codex MCP config
 ├── login_setup.py         # Terminal authentication script
 ├── pyproject.toml         # Project configuration
 ├── requirements.txt       # Dependencies
@@ -466,11 +537,11 @@ monarch-mcp-server/
 ### Session Management
 - Session tokens are stored securely in the system keyring (with an automatic file fallback for environments without a keyring backend)
 - The `device-uuid` captured at login is stored alongside the token so it reloads cleanly
-- Sessions persist across Claude Desktop and Claude Code restarts
+- Sessions persist across Claude Desktop, Claude Code, and Codex restarts
 - No need for frequent re-authentication
 
 ### Security Features
-- Credentials never transmitted through Claude Desktop or Claude Code
+- Credentials never transmitted through Claude Desktop, Claude Code, or Codex
 - MFA/2FA fully supported
 - Email verification codes are handled only in the terminal setup script
 - Session tokens are stored in the system keyring
@@ -480,7 +551,7 @@ monarch-mcp-server/
 
 Several tools mutate your Monarch ledger (`create_transaction`, `update_transaction`, `delete_transaction`, `bulk_categorize_transactions`, `upload_account_balance_history`, `set_transaction_tags`, `create_transaction_rule`, `update_transaction_rule`, `delete_transaction_rule`, `split_transaction`, `set_budget_amount`, `update_merchant`, `review_recurring_stream`).
 
-Because the LLM can be influenced by data it reads back (a malicious-looking memo or merchant name in a transaction), the safest setup is to configure your MCP client to require manual approval before any mutating tool runs. In Claude Desktop and Claude Code this is the default behavior for unknown tools; keep it that way for the tools listed above rather than allow-listing them.
+Because the LLM can be influenced by data it reads back (a malicious-looking memo or merchant name in a transaction), the safest setup is to configure your MCP client to require manual approval before any mutating tool runs. In Claude Desktop and Claude Code this is the default behavior for unknown tools; keep it that way for the tools listed above rather than allow-listing them. In Codex, keep `default_tools_approval_mode = "prompt"` and set `approval_mode = "approve"` on those write tools (see [`examples/codex.config.toml`](examples/codex.config.toml)).
 
 `bulk_categorize_transactions` and `upload_account_balance_history` also accept a `dry_run=True` argument that returns the planned changes without executing them, useful for previewing a bulk action before approving it.
 
@@ -511,5 +582,5 @@ For issues:
 
 To update the server:
 1. Pull latest changes from repository
-2. Restart Claude Desktop or Claude Code
+2. Restart Claude Desktop, Claude Code, or Codex
 3. Re-run authentication if needed: `python login_setup.py`

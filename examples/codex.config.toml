@@ -1,0 +1,60 @@
+# Example OpenAI Codex MCP config for the Monarch Money server.
+# Copy the tables you need into ~/.codex/config.toml (user-level) or
+# .codex/config.toml in a trusted project. Replace the placeholder path.
+
+[mcp_servers.monarch-money]
+command = "uv"
+args = [
+  "run",
+  "--directory",
+  "/path/to/your/monarch-mcp-server",
+  "monarch-mcp-server",
+]
+startup_timeout_sec = 30
+tool_timeout_sec = 120
+# Prompt before running tools; require explicit approval for writes below.
+default_tools_approval_mode = "prompt"
+
+# If you installed with pip (`pip install -e .`) instead of uv:
+# command = "python"
+# args = ["-m", "monarch_mcp_server"]
+# cwd = "/path/to/your/monarch-mcp-server"
+
+[mcp_servers.monarch-money.tools.create_transaction]
+approval_mode = "approve"
+
+[mcp_servers.monarch-money.tools.update_transaction]
+approval_mode = "approve"
+
+[mcp_servers.monarch-money.tools.delete_transaction]
+approval_mode = "approve"
+
+[mcp_servers.monarch-money.tools.bulk_categorize_transactions]
+approval_mode = "approve"
+
+[mcp_servers.monarch-money.tools.upload_account_balance_history]
+approval_mode = "approve"
+
+[mcp_servers.monarch-money.tools.set_transaction_tags]
+approval_mode = "approve"
+
+[mcp_servers.monarch-money.tools.create_transaction_rule]
+approval_mode = "approve"
+
+[mcp_servers.monarch-money.tools.update_transaction_rule]
+approval_mode = "approve"
+
+[mcp_servers.monarch-money.tools.delete_transaction_rule]
+approval_mode = "approve"
+
+[mcp_servers.monarch-money.tools.split_transaction]
+approval_mode = "approve"
+
+[mcp_servers.monarch-money.tools.set_budget_amount]
+approval_mode = "approve"
+
+[mcp_servers.monarch-money.tools.update_merchant]
+approval_mode = "approve"
+
+[mcp_servers.monarch-money.tools.review_recurring_stream]
+approval_mode = "approve"

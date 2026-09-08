@@ -1,11 +1,13 @@
 """FastMCP application instance and entry point."""
 
 import logging
+import sys
 
 from mcp.server.fastmcp import FastMCP
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+# Stdio MCP reserves stdout for JSON-RPC. Keep all logs on stderr so Codex
+# (and other strict hosts) do not see banner/log lines on the protocol stream.
+logging.basicConfig(stream=sys.stderr, level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # The gql aiohttp transport logs full GraphQL requests/responses at INFO, which
@@ -28,7 +30,7 @@ def main() -> None:
     """Main entry point for the server."""
     logger.info("Starting Monarch Money MCP Server...")
     try:
-        mcp.run()
+        mcp.run(transport="stdio")
     except Exception as e:
         logger.error(f"Failed to run server: {str(e)}")
         raise
