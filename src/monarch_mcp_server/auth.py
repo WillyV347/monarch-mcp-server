@@ -2,9 +2,14 @@
 
 Uses MCP elicitation so credentials flow client-UI → server directly over
 the protocol — they never appear in tool arguments or the model's context.
+
+Codex and some other MCP hosts do not support elicitation reliably. Those
+clients should authenticate with ``login_setup.py`` instead.
 """
 
 from __future__ import annotations
+
+from typing import Any
 
 from mcp.server.fastmcp import Context
 from monarchmoney import MonarchMoney, RequireMFAException
@@ -13,18 +18,51 @@ from pydantic import BaseModel, Field
 from monarch_mcp_server.secure_session import secure_session
 
 
-_UPGRADE_HINT = (
-    "Elicitation requires the MCP Python SDK >= 1.10.0 (added in June 2025). "
-    "Your MCP server install appears to be running an older version that does "
-    "not expose Context.elicit. Upgrade the `mcp` package, then restart your "
-    "MCP client. If you launch via `uv run --with mcp[cli]`, run `uv cache "
-    "clean mcp` first so a fresh version is resolved. As a fallback, run "
-    "`python login_setup.py` from the repo to authenticate via terminal."
+_CANCELLED = object()
+
+_TERMINAL_SETUP_HINT = (
+    "Interactive login is not available in this client. Run "
+    "`python login_setup.py` from the monarch-mcp-server repo, then retry. "
+    "The saved session is shared across Codex, Claude Desktop, and Claude Code."
 )
 
 
 def _elicit_supported(ctx: Context) -> bool:
     return hasattr(ctx, "elicit")
+
+
+def _field_value(data: Any, field: str) -> Any:
+    if isinstance(data, dict):
+        return data.get(field)
+    return getattr(data, field, None)
+
+
+def _extract_accepted_data(form_result: Any, *required_fields: str) -> Any:
+    """Return accepted form data, ``_CANCELLED``, or ``None`` if unusable.
+
+    Codex has been observed to reject elicitation schemas or accept with empty
+    ``content``. Treat those as "use the terminal setup script" rather than a
+    successful login.
+    """
+    if form_result is None:
+        return None
+    if getattr(form_result, "action", None) != "accept":
+        return _CANCELLED
+    data = getattr(form_result, "data", None)
+    if data is None:
+        return None
+    for field in required_fields:
+        value = _field_value(data, field)
+        if value is None:
+            return None
+    return data
+
+
+async def _elicit(ctx: Context, message: str, schema: type[BaseModel]) -> Any:
+    try:
+        return await ctx.elicit(message=message, schema=schema)
+    except Exception:
+        return None
 
 
 class LoginForm(BaseModel):
@@ -47,28 +85,36 @@ class TokenForm(BaseModel):
 
 async def login_interactive(ctx: Context) -> str:
     if not _elicit_supported(ctx):
-        return _UPGRADE_HINT
-    form_result = await ctx.elicit(message="Sign in to Monarch Money.", schema=LoginForm)
-    if form_result.action != "accept":
+        return _TERMINAL_SETUP_HINT
+    form_result = await _elicit(ctx, "Sign in to Monarch Money.", LoginForm)
+    form = _extract_accepted_data(form_result, "email", "password")
+    if form is _CANCELLED:
         return "Login cancelled."
-    form = form_result.data
+    if form is None:
+        return _TERMINAL_SETUP_HINT
+
+    email = _field_value(form, "email")
+    password = _field_value(form, "password")
 
     mm = MonarchMoney()
     try:
         await mm.login(
-            form.email,
-            form.password,
+            email,
+            password,
             use_saved_session=False,
             save_session=False,
         )
     except RequireMFAException:
-        mfa_result = await ctx.elicit(
-            message="Enter your Monarch Money MFA code.", schema=MFAForm
+        mfa_result = await _elicit(
+            ctx, "Enter your Monarch Money MFA code.", MFAForm
         )
-        if mfa_result.action != "accept":
+        mfa = _extract_accepted_data(mfa_result, "mfa_code")
+        if mfa is _CANCELLED:
             return "Login cancelled."
+        if mfa is None:
+            return _TERMINAL_SETUP_HINT
         await mm.multi_factor_authenticate(
-            form.email, form.password, mfa_result.data.mfa_code
+            email, password, _field_value(mfa, "mfa_code")
         )
 
     secure_session.save_authenticated_session(mm)
@@ -77,14 +123,17 @@ async def login_interactive(ctx: Context) -> str:
 
 async def login_with_token_interactive(ctx: Context) -> str:
     if not _elicit_supported(ctx):
-        return _UPGRADE_HINT
-    form_result = await ctx.elicit(
-        message="Paste your Monarch Money session token.", schema=TokenForm
+        return _TERMINAL_SETUP_HINT
+    form_result = await _elicit(
+        ctx, "Paste your Monarch Money session token.", TokenForm
     )
-    if form_result.action != "accept":
+    form = _extract_accepted_data(form_result, "token")
+    if form is _CANCELLED:
         return "Login cancelled."
+    if form is None:
+        return _TERMINAL_SETUP_HINT
 
-    token = form_result.data.token.strip()
+    token = str(_field_value(form, "token") or "").strip()
     if not token:
         return "Empty token — aborting."
 

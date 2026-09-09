@@ -25,6 +25,10 @@ def cancel():
     return SimpleNamespace(action="cancel", data=None)
 
 
+def accept_empty():
+    return SimpleNamespace(action="accept", data=None)
+
+
 @pytest.fixture(autouse=True)
 def no_session_save():
     """Prevent real keyring writes during auth tests."""
@@ -149,17 +153,71 @@ class TestDebugSessionLoading:
 
 
 class TestElicitNotSupported:
-    """Older MCP SDKs (<1.10) do not expose Context.elicit."""
+    """Clients without elicitation (older SDKs, Codex) should use login_setup.py."""
 
-    def test_login_interactive_returns_upgrade_hint(self, no_session_save):
+    def test_login_interactive_returns_terminal_hint(self, no_session_save):
         ctx = SimpleNamespace()  # no elicit attribute
         result = asyncio.run(auth.login_interactive(ctx))
-        assert "1.10" in result
         assert "login_setup.py" in result
         no_session_save.save_authenticated_session.assert_not_called()
 
-    def test_login_with_token_returns_upgrade_hint(self, no_session_save):
+    def test_login_with_token_returns_terminal_hint(self, no_session_save):
         ctx = SimpleNamespace()
         result = asyncio.run(auth.login_with_token_interactive(ctx))
-        assert "1.10" in result
+        assert "login_setup.py" in result
         no_session_save.save_token.assert_not_called()
+
+
+class TestElicitClientGaps:
+    """Codex may reject elicitation schemas or accept with empty content."""
+
+    def test_elicit_exception_returns_terminal_hint(self, no_session_save):
+        ctx = make_ctx()
+        ctx.elicit = AsyncMock(side_effect=RuntimeError("unknown field 'title'"))
+        result = asyncio.run(auth.login_interactive(ctx))
+        assert "login_setup.py" in result
+        no_session_save.save_authenticated_session.assert_not_called()
+
+    def test_accept_with_empty_content_returns_terminal_hint(self, no_session_save):
+        ctx = make_ctx(accept_empty())
+        result = asyncio.run(auth.login_interactive(ctx))
+        assert "login_setup.py" in result
+        no_session_save.save_authenticated_session.assert_not_called()
+
+    def test_accept_with_missing_fields_returns_terminal_hint(self, no_session_save):
+        ctx = make_ctx(SimpleNamespace(action="accept", data={}))
+        result = asyncio.run(auth.login_interactive(ctx))
+        assert "login_setup.py" in result
+        no_session_save.save_authenticated_session.assert_not_called()
+
+    def test_token_elicit_exception_returns_terminal_hint(self, no_session_save):
+        ctx = make_ctx()
+        ctx.elicit = AsyncMock(side_effect=RuntimeError("schema rejected"))
+        result = asyncio.run(auth.login_with_token_interactive(ctx))
+        assert "login_setup.py" in result
+        no_session_save.save_token.assert_not_called()
+
+    def test_token_accept_empty_content_returns_terminal_hint(self, no_session_save):
+        ctx = make_ctx(accept_empty())
+        result = asyncio.run(auth.login_with_token_interactive(ctx))
+        assert "login_setup.py" in result
+        no_session_save.save_token.assert_not_called()
+
+    def test_mfa_empty_content_returns_terminal_hint(self, no_session_save):
+        mm = AsyncMock()
+        mm.login.side_effect = RequireMFAException("mfa")
+        with patch("monarch_mcp_server.auth.MonarchMoney", return_value=mm):
+            ctx = make_ctx(accept(email="a@b.com", password="pw"), accept_empty())
+            result = asyncio.run(auth.login_interactive(ctx))
+        assert "login_setup.py" in result
+        no_session_save.save_authenticated_session.assert_not_called()
+
+
+class TestSetupAuthentication:
+    def test_recommends_terminal_setup_for_codex(self):
+        from monarch_mcp_server.tools import auth as tools_auth
+
+        result = asyncio.run(tools_auth.setup_authentication())
+        assert "login_setup.py" in result
+        assert "Codex" in result
+        assert "monarch_login" in result
